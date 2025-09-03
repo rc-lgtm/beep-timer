@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>20s Beep Timer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    background: #202225; color: #fff; transition: background-color 200ms linear;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1 { font-size: 3.4rem; margin: 0.2rem 0; letter-spacing: 0.5px; }
+  #status { margin: 0.2rem 0 1rem; opacity: 0.85; }
+  .btns { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; }
+  button {
+    font-size: 1.1rem; padding: 0.7rem 1.1rem; border-radius: 14px; border: none;
+    background: #2f80ed; color: #fff;
+  }
+  button:disabled { opacity: 0.6; }
+  footer { position: fixed; bottom: env(safe-area-inset-bottom, 8px); font-size: .8rem; opacity: .7; }
+</style>
+</head>
+<body>
+  <h1 id="time">10:00</h1>
+  <div id="status">Ready</div>
+  <div class="btns">
+    <button id="start">Start</button>
+    <button id="reset">Reset</button>
+  </div>
+  <footer>Leave this page visible & volume on for beeps.</footer>
+
+<script>
+(() => {
+  const TOTAL = 10 * 60;     // 600s
+  const PRE   = 5;           // 5s pre-countdown
+  const timeEl = document.getElementById('time');
+  const statusEl = document.getElementById('status');
+  const startBtn = document.getElementById('start');
+  const resetBtn = document.getElementById('reset');
+  let remaining = TOTAL;
+  let preRemaining = PRE;
+  let inPre = false;
+  let running = false;
+  let nextColor = 'green';
+  let tickId = null, preId = null;
+
+  // Web Audio beep (works in Mobile Safari after a user gesture)
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 1000;
+    gain.gain.value = 0.12; // loudness
+    osc.connect(gain).connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    osc.start(now);
+    osc.stop(now + 0.2); // 200 ms
+  }
+
+  function setBg(color) {
+    if (color === 'green') document.body.style.background = '#1f7a1f';
+    else if (color === 'red') document.body.style.background = '#8b1a1a';
+    else document.body.style.background = '#202225';
+  }
+
+  function fmt(secs) {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+
+  function updateTime() { timeEl.textContent = fmt(remaining); }
+  function updatePre()  { timeEl.textContent = `00:${String(preRemaining).padStart(2,'0')}`; }
+
+  function onStart() {
+    if (running || inPre) return;
+    ensureAudio();
+    inPre = true;
+    startBtn.disabled = true;
+    setBg(null);
+    statusEl.textContent = 'Starting in 5…';
+    preRemaining = PRE;
+    updatePre();
+    preId = setTimeout(preTick, 1000);
+  }
+
+  function preTick() {
+    if (!inPre) return;
+    preRemaining--;
+    if (preRemaining <= 0) {
+      // Begin main countdown
+      inPre = false;
+      running = true;
+      remaining = TOTAL;
+      statusEl.textContent = 'Counting down…';
+      updateTime();
+
+      // Beep + color flip immediately at 10:00 start
+      doBeepAndColor();
+
+      tickId = setTimeout(tick, 1000);
+    } else {
+      statusEl.textContent = `Starting in ${preRemaining}…`;
+      updatePre();
+      preId = setTimeout(preTick, 1000);
+    }
+  }
+
+  function doBeepAndColor() {
+    beep();
+    if (nextColor === 'green') { setBg('green'); nextColor = 'red'; }
+    else { setBg('red'); nextColor = 'green'; }
+  }
+
+  function tick() {
+    if (!running) return;
+    remaining--;
+    updateTime();
+
+    // Beep every 20s after start (9:40, 9:20, …)
+    if (remaining % 20 === 0) {
+      doBeepAndColor();
+    }
+
+    if (remaining <= 0) {
+      doBeepAndColor(); // final beep/color at 0
+      running = false;
+      startBtn.disabled = false;
+      statusEl.textContent = "Time's up!";
+      return;
+    }
+    tickId = setTimeout(tick, 1000);
+  }
+
+  function onReset() {
+    if (tickId) { clearTimeout(tickId); tickId = null; }
+    if (preId)  { clearTimeout(preId);  preId = null; }
+    running = false; inPre = false;
+    remaining = TOTAL; preRemaining = PRE; nextColor = 'green';
+    setBg(null);
+    timeEl.textContent = fmt(TOTAL);
+    statusEl.textContent = 'Ready';
+    startBtn.disabled = false;
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  // iOS: resume audio after returning to foreground
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  });
+
+  startBtn.addEventListener('click', onStart);
+  resetBtn.addEventListener('click', onReset);
+})();
+</script>
+</body>
+</html>

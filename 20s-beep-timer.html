@@ -1,170 +1,318 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>20s Beep Timer</title>
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    min-height: 100vh; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-    background: #202225; color: #fff; transition: background-color 200ms linear;
-    -webkit-tap-highlight-color: transparent;
-  }
-  h1 { font-size: 3.4rem; margin: 0.2rem 0; letter-spacing: 0.5px; }
-  #status { margin: 0.2rem 0 1rem; opacity: 0.85; }
-  .btns { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; }
-  button {
-    font-size: 1.1rem; padding: 0.7rem 1.1rem; border-radius: 14px; border: none;
-    background: #2f80ed; color: #fff;
-  }
-  button:disabled { opacity: 0.6; }
-  footer { position: fixed; bottom: env(safe-area-inset-bottom, 8px); font-size: .8rem; opacity: .7; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workout Timer</title>
+  <style>
+    :root{
+      --blue:#2563eb;
+      --green:#16a34a;
+      --red:#dc2626;
+      --black:#0b0b0b;
+      --text:#ffffff;
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: var(--black);
+      color: var(--text);
+    }
+    .wrap{
+      min-height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      transition: background-color .25s ease;
+    }
+    .card{
+      width:min(720px, 95vw);
+      text-align:center;
+    }
+    .display{
+      font-size: clamp(48px, 12vw, 120px);
+      font-weight: 800;
+      letter-spacing: .04em;
+      padding: 24px 16px;
+      margin-bottom: 16px;
+      user-select:none;
+    }
+    .status{
+      margin-top: -8px;
+      margin-bottom: 16px;
+      font-size: clamp(16px, 3.8vw, 22px);
+      opacity:.9;
+      min-height: 1.4em;
+    }
+    .row{
+      display:flex;
+      gap:10px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
+    button{
+      font-size:18px;
+      font-weight:700;
+      padding:12px 18px;
+      border-radius:12px;
+      border:0;
+      cursor:pointer;
+      background:#ffffff;
+      color:#111;
+      box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    }
+    button:active{ transform: translateY(1px); }
+    .opts{
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      align-items:center;
+      margin-top:14px;
+      font-size:14px;
+      opacity:.95;
+    }
+    .hint{
+      margin-top:8px;
+      font-size:13px;
+      opacity:.8;
+    }
+    .linkish { text-decoration: underline; cursor:default; }
+  </style>
 </head>
 <body>
-  <h1 id="time">10:00</h1>
-  <div id="status">Ready</div>
-  <div class="btns">
-    <button id="start">Start</button>
-    <button id="reset">Reset</button>
+  <div class="wrap" id="bg">
+    <div class="card">
+      <div class="display" id="time">Press Start</div>
+      <div class="status" id="status"></div>
+      <div class="row">
+        <button id="start">Start</button>
+        <button id="pause">Pause</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="enable-sound" checked> Beeps on</label>
+        <label><input type="checkbox" id="enable-speech" checked> Speak “Workout done”</label>
+      </div>
+      <div class="hint">
+        Space = Start/Pause • Esc = Reset • Every 20s: beep + color swap (blue/green)
+      </div>
+    </div>
   </div>
-  <footer>Leave this page visible & volume on for beeps.</footer>
 
-<script>
-(() => {
-  const TOTAL = 10 * 60;     // 600s
-  const PRE   = 5;           // 5s pre-countdown
-  const timeEl = document.getElementById('time');
-  const statusEl = document.getElementById('status');
-  const startBtn = document.getElementById('start');
-  const resetBtn = document.getElementById('reset');
-  let remaining = TOTAL;
-  let preRemaining = PRE;
-  let inPre = false;
-  let running = false;
-  let nextColor = 'green';
-  let tickId = null, preId = null;
+  <script>
+  (() => {
+    // ---- Settings ----
+    const PRE_SECONDS = 5;          // 5-second pre-countdown (red, negative display)
+    const MAIN_SECONDS = 10 * 60;   // 10 minutes
+    const SHORT_BEEP_MS = 160;
+    const LONG_BEEP_MS  = 600;      // long beep at transition from pre -> main
 
-  // Web Audio beep (works in Mobile Safari after a user gesture)
-  let audioCtx = null;
-  function ensureAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-  }
-  function beep() {
-    if (!audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 1000;
-    gain.gain.value = 0.12; // loudness
-    osc.connect(gain).connect(audioCtx.destination);
-    const now = audioCtx.currentTime;
-    osc.start(now);
-    osc.stop(now + 0.2); // 200 ms
-  }
+    // Colors
+    const COLOR_BLUE = getCSSVar('--blue');
+    const COLOR_GREEN = getCSSVar('--green');
+    const COLOR_RED = getCSSVar('--red');
+    const COLOR_BLACK = getCSSVar('--black');
 
-  function setBg(color) {
-    if (color === 'green') document.body.style.background = '#1f7a1f';
-    else if (color === 'red') document.body.style.background = '#8b1a1a';
-    else document.body.style.background = '#202225';
-  }
+    // Elements
+    const bgEl = document.getElementById('bg');
+    const timeEl = document.getElementById('time');
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('start');
+    const pauseBtn = document.getElementById('pause');
+    const resetBtn = document.getElementById('reset');
+    const soundToggle = document.getElementById('enable-sound');
+    const speechToggle = document.getElementById('enable-speech');
 
-  function fmt(secs) {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  }
+    // State
+    let phase = 'idle'; // 'idle' | 'pre' | 'main' | 'done'
+    let running = false;
+    let loopId = null;
 
-  function updateTime() { timeEl.textContent = fmt(remaining); }
-  function updatePre()  { timeEl.textContent = `00:${String(preRemaining).padStart(2,'0')}`; }
+    let preRemaining = PRE_SECONDS;
+    let mainRemaining = MAIN_SECONDS;
 
-  function onStart() {
-    if (running || inPre) return;
-    ensureAudio();
-    inPre = true;
-    startBtn.disabled = true;
-    setBg(null);
-    statusEl.textContent = 'Starting in 5…';
-    preRemaining = PRE;
-    updatePre();
-    preId = setTimeout(preTick, 1000);
-  }
+    let prevTick = 0;
+    let last20Bucket = Math.floor(MAIN_SECONDS / 20); // sentinel; will get reset on start
+    let currentMainColor = COLOR_BLUE;
+    let audioCtx = null;
 
-  function preTick() {
-    if (!inPre) return;
-    preRemaining--;
-    if (preRemaining <= 0) {
-      // Begin main countdown
-      inPre = false;
-      running = true;
-      remaining = TOTAL;
-      statusEl.textContent = 'Counting down…';
-      updateTime();
-
-      // Beep + color flip immediately at 10:00 start
-      doBeepAndColor();
-
-      tickId = setTimeout(tick, 1000);
-    } else {
-      statusEl.textContent = `Starting in ${preRemaining}…`;
-      updatePre();
-      preId = setTimeout(preTick, 1000);
+    // ---- UI helpers ----
+    function setBG(color) { bgEl.style.backgroundColor = color; }
+    function formatMMSS(sec) {
+      sec = Math.max(0, Math.ceil(sec)); // display rounds up remaining seconds
+      const mm = Math.floor(sec / 60);
+      const ss = sec % 60;
+      return `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
     }
-  }
+    function setDisplayPre(sec) {
+      timeEl.textContent = `-${formatMMSS(sec)}`;
+    }
+    function setDisplayMain(sec) {
+      const s = Math.max(0, Math.ceil(sec));
+      timeEl.textContent = formatMMSS(s);
+    }
+    function setStatus(msg='') { statusEl.textContent = msg; }
+    function getCSSVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
-  function doBeepAndColor() {
-    beep();
-    if (nextColor === 'green') { setBg('green'); nextColor = 'red'; }
-    else { setBg('red'); nextColor = 'green'; }
-  }
+    // ---- Audio ----
+    function ensureAudio() {
+      if (!audioCtx) {
+        try {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+          console.warn('WebAudio unavailable', e);
+        }
+      }
+      return audioCtx;
+    }
+    function beep(ms=SHORT_BEEP_MS, freq=880){
+      if (!soundToggle.checked) return;
+      const ctx = ensureAudio();
+      if (!ctx) return;
 
-  function tick() {
-    if (!running) return;
-    remaining--;
-    updateTime();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      // envelope (avoid clicks)
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + 0.01);
+      gain.gain.setValueAtTime(0.35, now + (ms - 40)/1000);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + ms/1000);
 
-    // Beep every 20s after start (9:40, 9:20, …)
-    if (remaining % 20 === 0) {
-      doBeepAndColor();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + ms/1000);
+    }
+    function speak(text){
+      if (!speechToggle.checked) return;
+      if (!('speechSynthesis' in window)) return;
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.0; u.pitch = 1.0;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch {}
     }
 
-    if (remaining <= 0) {
-      doBeepAndColor(); // final beep/color at 0
+    // ---- Controls ----
+    startBtn.addEventListener('click', startTimer);
+    pauseBtn.addEventListener('click', pauseTimer);
+    resetBtn.addEventListener('click', resetTimer);
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') { e.preventDefault(); toggleStartPause(); }
+      if (e.code === 'Escape') { e.preventDefault(); resetTimer(); }
+    });
+
+    function startTimer(){
+      if (phase === 'idle' || phase === 'done') {
+        preRemaining = PRE_SECONDS;
+        mainRemaining = MAIN_SECONDS;
+        last20Bucket = Math.floor(mainRemaining / 20); // reset the 20s bucket
+        currentMainColor = COLOR_BLUE;
+
+        phase = 'pre';
+        setBG(COLOR_RED);
+        setDisplayPre(preRemaining);
+        setStatus('Get ready…');
+      }
+      if (!running){
+        ensureAudio(); // prime on gesture
+        running = true;
+        prevTick = performance.now();
+        scheduleLoop();
+      }
+    }
+
+    function pauseTimer(){
       running = false;
-      startBtn.disabled = false;
-      statusEl.textContent = "Time's up!";
-      return;
+      if (loopId) {
+        cancelAnimationFrame(loopId);
+        loopId = null;
+      }
+      setStatus('Paused');
     }
-    tickId = setTimeout(tick, 1000);
-  }
 
-  function onReset() {
-    if (tickId) { clearTimeout(tickId); tickId = null; }
-    if (preId)  { clearTimeout(preId);  preId = null; }
-    running = false; inPre = false;
-    remaining = TOTAL; preRemaining = PRE; nextColor = 'green';
-    setBg(null);
-    timeEl.textContent = fmt(TOTAL);
-    statusEl.textContent = 'Ready';
-    startBtn.disabled = false;
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-  }
-
-  // iOS: resume audio after returning to foreground
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
+    function resetTimer(){
+      running = false;
+      if (loopId) {
+        cancelAnimationFrame(loopId);
+        loopId = null;
+      }
+      phase = 'idle';
+      preRemaining = PRE_SECONDS;
+      mainRemaining = MAIN_SECONDS;
+      last20Bucket = Math.floor(mainRemaining / 20);
+      setBG(COLOR_BLACK);
+      timeEl.textContent = 'Press Start';
+      setStatus('');
     }
-  });
 
-  startBtn.addEventListener('click', onStart);
-  resetBtn.addEventListener('click', onReset);
-})();
-</script>
+    function toggleStartPause(){
+      if (running) pauseTimer();
+      else startTimer();
+    }
+
+    // ---- Main loop (delta-t based, drift-resistant) ----
+    function scheduleLoop(){ loopId = requestAnimationFrame(tick); }
+    function tick(now){
+      if (!running) return;
+      const dt = Math.min(0.25, (now - prevTick) / 1000); // cap big frame jumps
+      prevTick = now;
+
+      if (phase === 'pre'){
+        preRemaining -= dt;
+        if (preRemaining > 0){
+          setDisplayPre(preRemaining);
+        } else {
+          // Transition to main
+          phase = 'main';
+          setBG(currentMainColor = COLOR_BLUE);
+          setDisplayMain(mainRemaining);
+          setStatus('Go!');
+          beep(LONG_BEEP_MS, 880); // long beep exactly when main starts
+        }
+        scheduleLoop();
+        return;
+      }
+
+      if (phase === 'main'){
+        const prevRemaining = mainRemaining;
+        mainRemaining -= dt;
+
+        // Detect crossing 20s boundaries (excluding the very first instant at 10:00)
+        const prevBucket = Math.floor(prevRemaining / 20);
+        const currBucket = Math.floor(Math.max(0, mainRemaining) / 20);
+        if (currBucket !== prevBucket && prevRemaining !== MAIN_SECONDS) {
+          // crossed into a new 20s slot
+          beep(SHORT_BEEP_MS, 880);
+          // toggle color
+          currentMainColor = (currentMainColor === COLOR_BLUE) ? COLOR_GREEN : COLOR_BLUE;
+          setBG(currentMainColor);
+        }
+
+        if (mainRemaining > 0){
+          setDisplayMain(mainRemaining);
+          scheduleLoop();
+        } else {
+          // Done
+          phase = 'done';
+          setBG(COLOR_BLACK);
+          timeEl.textContent = 'Workout done!';
+          setStatus('');
+          beep(SHORT_BEEP_MS, 880);
+          speak('Workout done');
+        }
+        return;
+      }
+
+      // done/idle fallthrough
+    }
+  })();
+  </script>
 </body>
 </html>
